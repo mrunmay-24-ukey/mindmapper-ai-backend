@@ -16,8 +16,25 @@ const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
 // Function to extract content from URL
 async function extractContentFromURL(url) {
+  let browser;
   try {
-    const browser = await puppeteer.launch({ headless: 'new' });
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-zygote',
+        '--no-first-run',
+        '--single-process', // Ensures a single process for memory efficiency
+        '--disable-gpu'
+      ],
+      executablePath: process.env.CHROME_BIN ||
+                      (process.platform === 'win32' ? null : '/usr/bin/chromium-browser') || 
+                      (process.platform === 'win32' ? null : '/usr/bin/google-chrome') ||
+                      (process.platform === 'darwin' ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : null) // Fallback for macOS local
+    });
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: 'networkidle0' });
     
@@ -34,6 +51,7 @@ async function extractContentFromURL(url) {
     return content;
   } catch (error) {
     console.error('Error extracting content from URL:', error);
+    if (browser) await browser.close(); // Ensure browser is closed even on error
     throw error;
   }
 }
