@@ -2,7 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import puppeteer from 'puppeteer';
+import axios from 'axios';
+import * as cheerio from 'cheerio';
 
 dotenv.config();
 
@@ -14,46 +15,56 @@ app.use(express.json());
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
-// Function to extract content from URL
+// Function to extract content from URL using axios and cheerio
 async function extractContentFromURL(url) {
-  let browser;
   try {
-    browser = await puppeteer.launch({
-      headless: 'new',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-zygote',
-        '--no-first-run',
-        '--single-process', // Ensures a single process for memory efficiency
-        '--disable-gpu'
-      ],
-      executablePath: process.env.CHROME_BIN ||
-                      (process.platform === 'win32' ? null : '/usr/bin/chromium-browser') || 
-                      (process.platform === 'win32' ? null : '/usr/bin/google-chrome') ||
-                      (process.platform === 'darwin' ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : null) // Fallback for macOS local
-    });
-    const page = await browser.newPage();
-    await page.goto(url, { waitUntil: 'networkidle0' });
-    
-    const content = await page.evaluate(() => {
-      const article = document.querySelector('article') || 
-                     document.querySelector('.article') || 
-                     document.querySelector('.post') ||
-                     document.querySelector('main');
-      
-      return article ? article.innerText : document.body.innerText;
-    });
-    
-    await browser.close();
+    const { data } = await axios.get(url);
+    const $ = cheerio.load(data);
+
+    // Attempt to find the main content block, prioritizing common article selectors
+    let content = '';
+    const selectors = [
+      'article',
+      'main',
+      '.story-content',
+      '.article-content',
+      '.post-content',
+      'div[itemprop="articleBody"]',
+      'body' // Fallback to body if nothing else is found
+    ];
+
+    for (const selector of selectors) {
+      const element = $(selector);
+      if (element.length) {
+        content = element.text();
+        // Basic cleanup: remove extra whitespace, newlines, etc.
+        content = content.replace(/\s\s+/g, ' ').trim();
+        if (content.length > 100) break; // If we found substantial content, stop
+      }
+    }
+
+    if (!content) {
+      throw new Error('Could not extract meaningful content from the URL.');
+    }
+
     return content;
   } catch (error) {
-    console.error('Error extracting content from URL:', error);
-    if (browser) await browser.close(); // Ensure browser is closed even on error
-    throw error;
+    console.error('Error extracting content from URL:', error.message);
+    throw new Error(`Failed to extract content from URL: ${error.message}`);
   }
+}
+
+// Helper to extract JSON from markdown code block
+function extractJsonFromMarkdown(text) {
+  const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (match) {
+    return match[1];
+  }
+  const braceMatch = text.match(/{[\s\S]*}/);
+  if (braceMatch) {
+    return braceMatch[0];
+  }
+  return text;
 }
 
 // Function to generate summary
@@ -96,19 +107,6 @@ function splitTextIntoChunks(text, chunkSize = 1000) {
   }
 
   return chunks;
-}
-
-// Helper to extract JSON from markdown code block
-function extractJsonFromMarkdown(text) {
-  const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  if (match) {
-    return match[1];
-  }
-  const braceMatch = text.match(/{[\s\S]*}/);
-  if (braceMatch) {
-    return braceMatch[0];
-  }
-  return text;
 }
 
 // Function to extract topics
