@@ -13,7 +13,7 @@ app.use(express.json());
 
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
 // Function to extract content from URL using axios and cheerio
 async function extractContentFromURL(url) {
